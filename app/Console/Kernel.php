@@ -62,81 +62,83 @@ class Kernel extends ConsoleKernel
             $apiRequest = $client->Get(config('elasticsearch.elastic_search_url').date('Y-m-d').'*/_search?scroll=5m',$requestContent);
 
             $response = json_decode($apiRequest->getBody(), true);
-            $scrollID = $response["_scroll_id"];
 
-            $insertStrings = array();
+            if(array_key_exists("_scroll_id",$response)){
+                $scrollID = $response["_scroll_id"];
 
-            $requestContent = [
-                'headers' => [
-                    'Accept' => 'application/json',
-                    'Content-Type' => 'application/json'
-                ],
-                'json' => [
-                    "scroll" => "5m",
-                    "scroll_id" => $scrollID,
-                ]
-            ];
+                $insertStrings = array();
 
-            $i = 1;
+                $requestContent = [
+                    'headers' => [
+                        'Accept' => 'application/json',
+                        'Content-Type' => 'application/json'
+                    ],
+                    'json' => [
+                        "scroll" => "5m",
+                        "scroll_id" => $scrollID,
+                    ]
+                ];
 
-            while($response["hits"]["hits"]){
-                foreach ($response["hits"]["hits"] as $node){
+                $i = 1;
 
-                    //look up the cache
-                    $cachedNode = CachedNode::where('ip', $node["_source"]["ip"])->first();
-                    //if node is cached get it
-                    if($cachedNode){
-                        $response = $cachedNode->toArray();
-                        $cachedNode->touch();
+                while($response["hits"]["hits"]){
+                    foreach ($response["hits"]["hits"] as $node){
+
+                        //look up the cache
+                        $cachedNode = CachedNode::where('ip', $node["_source"]["ip"])->first();
+                        //if node is cached get it
+                        if($cachedNode){
+                            $response = $cachedNode->toArray();
+                            $cachedNode->touch();
+                        }
+                        //if not ask the api
+                        else{
+                            $client = new GuzzleHttpClient();
+                            $apiRequest = $client->Get('https://api.ipgeolocation.io/ipgeo?apiKey='.config('geolocation.ipgeolocation_key').'&ip='.$node["_source"]["ip"]);
+                            $response = json_decode($apiRequest->getBody(), true);
+                            //update or create cache entry
+                            $dbCachedNode = CachedNode::firstOrCreate(array('ip' => $node["_source"]["ip"]));
+                            $dbCachedNode->fill($response);
+                            $dbCachedNode->save();
+                            $response = $dbCachedNode->toArray();
+                        }
+
+                        $insertString = $i
+                            . "\t" . $node["_source"]["ip"]
+                            . "\t" . $response["continent_code"]
+                            . "\t" . $response["country_code2"]
+                            . "\t" . $response["city"]
+                            . "\t" . $response["latitude"]
+                            . "\t" . $response["longitude"]
+                            . "\t" . $response["isp"]
+                            . "\t" . $response["organization"]
+                            . "\t" . $node["_source"]["publicKey"]
+                            . "\t" . $node["_source"]["version"]
+                            . "\t" . date('Y-m-d H:i:s')
+                            . "\t" . date('Y-m-d H:i:s')
+                            . "\n";
+
+                        array_push($insertStrings,$insertString);
+                        $i++;
+
                     }
-                    //if not ask the api
-                    else{
-                        $client = new GuzzleHttpClient();
-                        $apiRequest = $client->Get('https://api.ipgeolocation.io/ipgeo?apiKey='.config('geolocation.ipgeolocation_key').'&ip='.$node["_source"]["ip"]);
-                        $response = json_decode($apiRequest->getBody(), true);
-                        //update or create cache entry
-                        $dbCachedNode = CachedNode::firstOrCreate(array('ip' => $node["_source"]["ip"]));
-                        $dbCachedNode->fill($response);
-                        $dbCachedNode->save();
-                        $response = $dbCachedNode->toArray();
-                    }
-
-                    $insertString = $i
-                        . "\t" . $node["_source"]["ip"]
-                        . "\t" . $response["continent_code"]
-                        . "\t" . $response["country_code2"]
-                        . "\t" . $response["city"]
-                        . "\t" . $response["latitude"]
-                        . "\t" . $response["longitude"]
-                        . "\t" . $response["isp"]
-                        . "\t" . $response["organization"]
-                        . "\t" . $node["_source"]["publicKey"]
-                        . "\t" . $node["_source"]["version"]
-                        . "\t" . date('Y-m-d H:i:s')
-                        . "\t" . date('Y-m-d H:i:s')
-                        . "\n";
-
-                    array_push($insertStrings,$insertString);
-                    $i++;
-
+                    //fetch next set
+                    $apiRequest = $client->Get('https://search-nkn-testnet-457rbvoxco6zwq4uaebeoolm4u.us-east-2.es.amazonaws.com/_search/scroll',$requestContent);
+                    $response = json_decode($apiRequest->getBody(), true);
                 }
-                //fetch next set
-                $apiRequest = $client->Get('https://search-nkn-testnet-457rbvoxco6zwq4uaebeoolm4u.us-east-2.es.amazonaws.com/_search/scroll',$requestContent);
-                $response = json_decode($apiRequest->getBody(), true);
+                if($i > 1){
+                    $host        = "host=" . config('database.connections.pgsql2.host');
+                    $port        = "port=" . config('database.connections.pgsql2.port');
+                    $dbname      = "dbname=" . config('database.connections.pgsql2.database');
+                    $dbuser      = "user=" . config('database.connections.pgsql2.username');
+                    $dbpass      = "password=" . config('database.connections.pgsql2.password');
+
+                    $db = pg_connect( "$host $port $dbname $dbuser $dbpass"  );
+
+                    CrawledNode::truncate();
+                    pg_copy_from($db,"crawled_nodes",$insertStrings);
+                }
             }
-            if($i > 1){
-                $host        = "host=" . config('database.connections.pgsql2.host');
-                $port        = "port=" . config('database.connections.pgsql2.port');
-                $dbname      = "dbname=" . config('database.connections.pgsql2.database');
-                $dbuser      = "user=" . config('database.connections.pgsql2.username');
-                $dbpass      = "password=" . config('database.connections.pgsql2.password');
-
-                $db = pg_connect( "$host $port $dbname $dbuser $dbpass"  );
-
-                CrawledNode::truncate();
-                pg_copy_from($db,"crawled_nodes",$insertStrings);
-            }
-
         })->everyFiveMinutes()->name('CrawlNodes')->withoutOverlapping()->appendOutputTo(storage_path('logs/CrawlNodes.log'));
 
         $schedule->call(function () {
