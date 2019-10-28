@@ -126,7 +126,7 @@ class Kernel extends ConsoleKernel
                     $apiRequest = $client->Get('https://search-nkn-testnet-457rbvoxco6zwq4uaebeoolm4u.us-east-2.es.amazonaws.com/_search/scroll',$requestContent);
                     $response = json_decode($apiRequest->getBody(), true);
                 }
-                if($i > 1){
+                if($i > 100){
                     $host        = "host=" . config('database.connections.pgsql2.host');
                     $port        = "port=" . config('database.connections.pgsql2.port');
                     $dbname      = "dbname=" . config('database.connections.pgsql2.database');
