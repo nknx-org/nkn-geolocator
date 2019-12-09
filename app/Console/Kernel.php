@@ -59,7 +59,7 @@ class Kernel extends ConsoleKernel
                 ]
             ];
 
-            $apiRequest = $client->Get(config('elasticsearch.elastic_search_url').date('Y-m-d').'*/_search?scroll=5m',$requestContent);
+            $apiRequest = $client->Get(config('elasticsearch.elastic_search_url')."balance-chord-".date('Y-m-d').'*/_search?scroll=5m',$requestContent);
 
             $response = json_decode($apiRequest->getBody(), true);
 
@@ -123,7 +123,7 @@ class Kernel extends ConsoleKernel
 
                     }
                     //fetch next set
-                    $apiRequest = $client->Get('https://search-nkn-testnet-457rbvoxco6zwq4uaebeoolm4u.us-east-2.es.amazonaws.com/_search/scroll',$requestContent);
+                    $apiRequest = $client->Get(config('elasticsearch.elastic_search_url').'_search/scroll',$requestContent);
                     $response = json_decode($apiRequest->getBody(), true);
                 }
                 if($i > 100){
